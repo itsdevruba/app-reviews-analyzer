@@ -266,20 +266,26 @@ def _get_json(url):
         return json.loads(r.read().decode("utf-8"))
 
 
-def search_apps(name, country_name):
-    """Look an app up in the App Store by name. Returns up to 5 'Name (id)' choices."""
+def lookup_apps(name, country_name):
+    """Look an app up in the App Store by name. Returns (up to 5 'Name (id)' choices, message). No Gradio."""
     if not name or not name.strip():
-        return gr.update(choices=[], value=None), "Type an app name first."
+        return [], "Type an app name first."
     cc = COUNTRIES.get(country_name, "us")
     try:
         data = _get_json("https://itunes.apple.com/search?" + urllib.parse.urlencode(
             {"term": name.strip(), "entity": "software", "country": cc, "limit": 5}))
     except Exception as e:
-        return gr.update(choices=[], value=None), f"Could not reach the App Store: {repr(e)[:150]}"
+        return [], f"Could not reach the App Store: {repr(e)[:150]}"
     found = [f"{r['trackName']} ({r['trackId']})" for r in data.get("results", [])]
     if not found:
-        return gr.update(choices=[], value=None), "No app found with that name in this country's App Store."
-    return gr.update(choices=found, value=found[0]), f"Found {len(found)} app(s). Pick the right one, then press Analyze."
+        return [], "No app found with that name in this country's App Store."
+    return found, f"Found {len(found)} app(s). Pick the right one, then press Analyze."
+
+
+def search_apps(name, country_name):
+    """Gradio version of lookup_apps."""
+    found, msg = lookup_apps(name, country_name)
+    return gr.update(choices=found, value=found[0] if found else None), msg
 
 
 def fetch_store_reviews(choice, country_name, pages=10):

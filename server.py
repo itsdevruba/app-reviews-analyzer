@@ -280,8 +280,8 @@ def config():
 
 @app.post("/api/search")
 def search(body: SearchIn):
-    upd, msg = core.search_apps(body.name, body.country)
-    return {"apps": upd.get("choices", []) if isinstance(upd, dict) else [], "message": msg}
+    found, msg = core.lookup_apps(body.name, body.country)
+    return {"apps": found, "message": msg}
 
 
 @app.post("/api/analyze")
