@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+python-multipart
+gradio
+transformers
+torch
+scikit-learn
+pandas
+numpy
+matplotlib
+nltk
