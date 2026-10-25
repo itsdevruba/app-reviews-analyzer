@@ -1,6 +1,6 @@
 """App Reviews Analyzer: a small web tool.
 
-Upload a CSV of app reviews (or paste reviews) and get:
+Pick an app from the App Store (or paste reviews) and get:
   1. how many reviews are positive / negative,
   2. what the unhappy users complain about (top words and phrases + complaint categories),
   3. a short summary of the negative reviews,
