@@ -6,7 +6,7 @@ app_port: 7860
 
 # App Reviews Analyzer
 
-A web site that shows what unhappy users complain about. Pick an app from the App Store, upload a CSV or
+A web site that shows what unhappy users complain about. Pick an app from the App Store, or
 paste reviews. You get: share of negative reviews, what to fix first, complaint groups, complaints over time
 and by app version, summaries with real examples, and a table you can download. Pretrained models only.
 

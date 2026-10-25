@@ -15,7 +15,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import pandas as pd
-from fastapi import FastAPI, File, Form, UploadFile
+from fastapi import FastAPI, Form
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -81,16 +81,10 @@ def analyze(job, p):
     job.progress(0, 2, "Reading your reviews")
     source_label = None
     try:
-        df = core.read_reviews(p.get("file_path"), p["pasted"])
+        df = core.read_reviews(None, p["pasted"])
     except Exception as e:
-        raise UserError("We couldn't read this file",
-                        f"{p.get('file_name') or 'The file'} could not be read as a CSV file ({str(e)[:140]}). "
-                        "Save it as .csv from your spreadsheet app, or paste the reviews as text instead.")
-    if p.get("file_path"):
-        source_label = p.get("file_name") or "uploaded file"
-        if p["pasted"].strip():
-            source_label += " + pasted reviews"
-    elif p["pasted"].strip():
+        raise UserError("We couldn't read these reviews", f"{str(e)[:160]}. Paste one review per line, in English.")
+    if p["pasted"].strip():
         source_label = "Pasted reviews"
     elif p.get("store_app"):
         try:
@@ -99,7 +93,7 @@ def analyze(job, p):
             raise UserError("We couldn't get reviews from the App Store", str(e)[:300])
         source_label = f"{p['store_app'].rsplit(' (', 1)[0]} · App Store ({p['country']})"
     if df.empty or source_label is None:
-        raise UserError("Nothing to analyze", "Choose an app, upload a CSV file or paste some reviews, then press Analyze.")
+        raise UserError("Nothing to analyze", "Choose an app or paste some reviews, then press Analyze.")
 
     n_raw = len(df)
     df, removed = core.filter_reviews(df, p["max_reviews"])
@@ -422,19 +416,11 @@ def search(body: SearchIn):
 
 
 @app.post("/api/analyze")
-async def start_analyze(file: UploadFile | None = File(None), pasted: str = Form(""), store_app: str = Form(""),
+async def start_analyze(pasted: str = Form(""), store_app: str = Form(""),
                         country: str = Form("United States"), cat_mode: str = Form("auto"),
                         categories: str = Form(""), max_reviews: int = Form(300), method: str = Form("tfidf")):
     params = {"pasted": pasted or "", "store_app": store_app, "country": country, "cat_mode": cat_mode,
               "categories": categories, "max_reviews": max(50, min(int(max_reviews), 1000)), "method": method}
-    if file is not None and file.filename:
-        data = await file.read()
-        if len(data) > 25 * 1024 * 1024:
-            return JSONResponse({"error": {"title": "File too large", "message": "Please upload a file under 25 MB."}}, status_code=400)
-        fd, path = tempfile.mkstemp(suffix=".csv")
-        with os.fdopen(fd, "wb") as f:
-            f.write(data)
-        params.update(file_path=path, file_name=file.filename)
     job = Job()
     for old in [k for k, j in JOBS.items() if time.time() - j.created > 3600]:
         JOBS.pop(old, None)

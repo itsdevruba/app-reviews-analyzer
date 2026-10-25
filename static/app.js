@@ -59,7 +59,7 @@ const S = {
   view: 'form',
   cfg: {countries: ['United States'], default_categories: [], built_by: '', github_url: ''},
   form: {appName: '', country: 'United States', apps: [], selected: '', searchMsg: '', searching: false,
-         file: null, pasted: '', catMode: 'auto', cats: [], maxN: 300, method: 'tfidf'},
+         pasted: '', catMode: 'auto', cats: [], maxN: 300, method: 'tfidf'},
   jobId: null, prog: {step: 0, pct: 0, notes: ['', '', '', ''], steps: []}, loadingMeta: '',
   result: null, error: null, poll: null,
   tbl: {filter: 'all', q: '', page: 1},
@@ -72,7 +72,7 @@ const PAGE_SIZE = 10;
 /* ---------------------------------------------------------------- layout */
 function renderNav() {
   const active = {form: 'form', loading: S.kind === 'compare' ? 'compare' : 'form', error: S.kind === 'compare' ? 'compare' : 'form', results: 'form', compare: 'compare', cresults: 'compare', check: 'check', about: 'about'}[S.view];
-  const items = [['form', 'chart', 'Analyze a file', '#/'], ['compare', 'scale', 'Compare apps', '#/compare'], ['check', 'chat', 'Check one review', '#/check'], ['about', 'info', 'About', '#/about']];
+  const items = [['form', 'chart', 'Analyze an app', '#/'], ['compare', 'scale', 'Compare apps', '#/compare'], ['check', 'chat', 'Check one review', '#/check'], ['about', 'info', 'About', '#/about']];
   $('#nav').innerHTML = items.map(([id, icon, label, href]) =>
     '<a href="' + href + '" data-nav="' + id + '"' + (active === id ? ' aria-current="page"' : '') + '>' + ic(icon) + label + '</a>').join('');
 }
@@ -84,7 +84,7 @@ function render() {
   main.innerHTML = views[S.view]();
   renderNav();
   if (S.view === 'results') updateTable();
-  document.title = {form: 'Analyze a file', loading: 'Analyzing reviews', results: 'Results', error: 'We could not analyze this',
+  document.title = {form: 'Analyze an app', loading: 'Analyzing reviews', results: 'Results', error: 'We could not analyze this',
                     check: 'Check one review', about: 'About', compare: 'Compare apps', cresults: 'Comparison'}[S.view] + ' · App Reviews Analyzer';
 }
 
@@ -106,13 +106,6 @@ function viewForm() {
         '<button type="button" class="appopt" data-act="pick-app" data-val="' + esc(a) + '" aria-pressed="' + (a === f.selected) + '">' +
         ic('bag', 's18') + '<span>' + esc(a.replace(/\s*\(\d+\)\s*$/, '')) + '</span></button>').join('') + '</div>'
     : '';
-  const fileBlock = f.file
-    ? '<div class="filechip">' + ic('file', 's18') + '<span>' + esc(f.file.name) + '</span><button type="button" class="iconbtn" data-act="remove-file" aria-label="Remove file">' + ic('x', 's18') + '</button></div>'
-    : '<label for="csv" class="dropzone" id="dz">' +
-        '<span class="dz-ic">' + ic('upload') + '</span>' +
-        '<span class="dz-title">Drag and drop a CSV file here</span>' +
-        '<span class="dz-sub">One review per row. We read the column named review, text or content. Dates, versions and stars are used when present.</span>' +
-        '<span class="dz-btn">Choose file</span></label>';
   const catBlock = f.catMode === 'auto'
     ? '<span class="sub">The negative reviews are grouped by the words they share, and each group is named by its strongest words.</span>'
     : '<div class="chips">' + f.cats.map((c, i) =>
@@ -120,7 +113,7 @@ function viewForm() {
         '<input id="cat-add" type="text" placeholder="Add a category" aria-label="Add a category"></div>' +
         '<span class="sub">Press Enter to add. Negative reviews are sorted into these.</span>';
   return '' +
-  '<div class="head-col"><h1>Analyze a file</h1><p class="muted" style="max-width:680px">Pick an app, upload a CSV of app reviews or paste them below. We sort them by sentiment, group the complaints, show what to fix first and summarize what unhappy users say.</p></div>' +
+  '<div class="head-col"><h1>Analyze an app</h1><p class="muted" style="max-width:680px">Pick an app from the App Store or paste some reviews below. We sort them by sentiment, group the complaints, show what to fix first and summarize what unhappy users say.</p></div>' +
   '<div class="form-grid">' +
   '<section class="card in" aria-labelledby="in-h">' +
     '<h2 id="in-h" class="with-ic">' + ic('upload') + 'Reviews</h2>' +
@@ -130,12 +123,10 @@ function viewForm() {
       '<button type="button" class="btn" data-act="search"' + (f.searching ? ' disabled' : '') + '>' + (f.searching ? spinner('s18') : ic('search', 's18')) + 'Find app</button></div>' +
       (f.searchMsg ? '<span class="sub" role="status">' + esc(f.searchMsg) + '</span>' : '') + appList +
       '<span class="sub">Gets the latest public reviews (up to about 500) with dates, app versions and stars.</span></div>' +
-    '<div class="divider"><i></i><span>or upload a file</span><i></i></div>' + fileBlock +
-    '<input id="csv" type="file" accept=".csv,text/csv" class="sr" data-bind="file">' +
     '<div class="divider"><i></i><span>or paste reviews</span><i></i></div>' +
     '<div class="field"><label for="paste" class="label">' + ic('clipboard', 's18') + 'Paste reviews, one per line</label>' +
       '<textarea id="paste" rows="6" class="input" data-bind="pasted" placeholder="The app keeps crashing since the last update&#10;Love the new dark mode, works great&#10;Too many ads, I can&#39;t even tap the play button">' + esc(f.pasted) + '</textarea>' +
-      '<div class="sep-row"><span id="paste-count">' + countLines(f.pasted) + ' reviews detected</span><span>English reviews only. A file or pasted reviews win over the app picker.</span></div></div>' +
+      '<div class="sep-row"><span id="paste-count">' + countLines(f.pasted) + ' reviews detected</span><span>English reviews only. Pasted reviews win over the app picker.</span></div></div>' +
   '</section>' +
   '<section class="card set" aria-labelledby="set-h" style="gap:24px">' +
     '<h2 id="set-h" class="with-ic">' + ic('sliders') + 'Settings</h2>' +
@@ -150,7 +141,7 @@ function viewForm() {
       '<span class="sub">' + METHOD_HELP[f.method] + '</span></fieldset>' +
     '<button type="button" class="btn primary big" data-act="analyze" style="margin-top:auto">' + ic('chart') + 'Analyze</button>' +
   '</section></div>' +
-  '<section class="card empty" aria-label="Results">' + ILLUS_EMPTY + '<h2>No results yet</h2><p>Pick an app, add a CSV or paste some reviews, then press Analyze. Your charts, summary and review table will appear here.</p></section>';
+  '<section class="card empty" aria-label="Results">' + ILLUS_EMPTY + '<h2>No results yet</h2><p>Pick an app or paste some reviews, then press Analyze. Your charts, summary and review table will appear here.</p></section>';
 }
 
 async function doSearch() {
@@ -168,17 +159,16 @@ async function doSearch() {
 
 async function startAnalyze() {
   const f = S.form;
-  const hasFile = !!f.file, hasPaste = f.pasted.trim().length > 0, hasApp = !!f.selected;
-  if (!hasFile && !hasPaste && !hasApp) {
-    S.error = {title: 'Nothing to analyze', message: 'Pick an app, upload a CSV file or paste some reviews, then press Analyze.'};
+  const hasPaste = f.pasted.trim().length > 0, hasApp = !!f.selected;
+  if (!hasPaste && !hasApp) {
+    S.error = {title: 'Nothing to analyze', message: 'Pick an app or paste some reviews, then press Analyze.'};
     return go('error');
   }
   const fd = new FormData();
-  if (hasFile) fd.append('file', f.file);
-  fd.append('pasted', f.pasted); fd.append('store_app', hasFile || hasPaste ? '' : f.selected);
+  fd.append('pasted', f.pasted); fd.append('store_app', hasPaste ? '' : f.selected);
   fd.append('country', f.country); fd.append('cat_mode', f.catMode); fd.append('categories', f.cats.join(','));
   fd.append('max_reviews', f.maxN); fd.append('method', f.method);
-  S.loadingMeta = hasFile ? f.file.name : hasPaste ? 'Pasted reviews' : f.selected.replace(/\s*\(\d+\)\s*$/, '') + ' · App Store';
+  S.loadingMeta = hasPaste ? 'Pasted reviews' : f.selected.replace(/\s*\(\d+\)\s*$/, '') + ' · App Store';
   S.kind = 'analyze';
   S.prog = {step: 0, pct: 0, notes: ['Starting', '', '', ''], steps: ['Loading models', 'Reading sentiment', 'Sorting complaints', 'Writing summary']};
   go('loading');
@@ -240,13 +230,10 @@ function viewLoading() {
 function viewError() {
   const e = S.error || {title: 'Something went wrong', message: 'Please try again.'};
   if (S.kind === 'compare') return '<h1>Compare apps</h1><section class="card errbox" role="alert" aria-labelledby="err-h">' + ILLUS_ERROR + '<h2 id="err-h">' + esc(e.title) + '</h2><p>' + esc(e.message) + '</p><div class="btns" style="justify-content:center;margin-top:8px"><button type="button" class="btn primary" data-act="to-compare">' + ic('scale', 's18') + 'Back to comparison</button></div></section>';
-  return '<h1>Analyze a file</h1>' +
+  return '<h1>Analyze an app</h1>' +
   '<section class="card errbox" role="alert" aria-labelledby="err-h">' + ILLUS_ERROR + '<h2 id="err-h">' + esc(e.title) + '</h2><p>' + esc(e.message) + '</p>' +
-    '<div class="btns" style="justify-content:center;margin-top:8px"><button type="button" class="btn primary" data-act="to-form" data-focus="csv">' + ic('upload', 's18') + 'Choose another file</button>' +
-    '<button type="button" class="btn" data-act="to-form" data-focus="paste">' + ic('clipboard', 's18') + 'Paste reviews instead</button></div></section>' +
-  '<section class="card" aria-labelledby="tips-h" style="gap:14px"><h2 id="tips-h" class="with-ic" style="font-size:16px;line-height:22px">' + ic('info') + 'What a good file looks like</h2>' +
-    '<div class="tips"><ul><li>Saved as .csv, UTF-8</li><li>A header row with a column called review, text or content</li><li>One review per row, in English</li><li>Optional columns: date, version, rating</li></ul>' +
-    '<pre class="code">review,rating,date,version\n"Crashes when I upload a photo",1,2026-10-02,9.1.0\n"Love the new dark mode",5,2026-10-03,9.1.0</pre></div></section>';
+    '<div class="btns" style="justify-content:center;margin-top:8px"><button type="button" class="btn primary" data-act="to-form" data-focus="app-name">' + ic('search', 's18') + 'Pick another app</button>' +
+    '<button type="button" class="btn" data-act="to-form" data-focus="paste">' + ic('clipboard', 's18') + 'Paste reviews instead</button></div></section>';
 }
 
 /* ---------------------------------------------------------------- results */
@@ -433,7 +420,7 @@ function viewAbout() {
     w('<strong>Pretrained models make mistakes.</strong> Sarcasm, mixed reviews and slang are often misread. Check some rows of the table by hand.') +
     w('<strong>AI summaries can invent details.</strong> Always check them against the examples and the review table.') +
     w('<strong>Automatic group names are just frequent words.</strong> Read the real examples before you trust a name.') +
-    '<li class="plain">' + ic('info') + '<span>App Store gives the latest ~500 reviews per country, which for a popular app can cover only a few days. Use a CSV with dates for longer periods. Up to 1,000 reviews per run.</span></li></ul></section>' +
+    '<li class="plain">' + ic('info') + '<span>App Store gives the latest ~500 reviews per country, which for a popular app can cover only a few days. Up to 1,000 reviews per run.</span></li></ul></section>' +
   '<section class="card" aria-labelledby="cr-h" style="flex-direction:row;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:16px"><div class="head-col" style="gap:4px"><h2 id="cr-h" style="font-size:16px;line-height:22px">NLP From Zero, GDG on Campus PNU</h2>' +
     (cfg.built_by ? '<span class="sub" style="font-size:14px;line-height:20px">Built by ' + esc(cfg.built_by) + '</span>' : '') + '</div>' +
     (cfg.github_url ? '<a class="btn" href="' + esc(cfg.github_url) + '" rel="noopener">' + ic('code', 's18') + 'View source code</a>' : '') + '</section>';
@@ -537,13 +524,12 @@ main.addEventListener('click', (e) => {
   const a = t.dataset.act, v = t.dataset.val, f = S.form;
   if (a === 'search') doSearch();
   else if (a === 'pick-app') { f.selected = v; render(); }
-  else if (a === 'remove-file') { f.file = null; render(); }
   else if (a === 'catmode') { f.catMode = v; render(); }
   else if (a === 'rm-cat') { f.cats.splice(Number(t.dataset.i), 1); render(); }
   else if (a === 'method') { f.method = v; render(); }
   else if (a === 'analyze') startAnalyze();
   else if (a === 'cancel') { S.jobId = null; clearTimeout(S.poll); go(S.kind === 'compare' ? 'compare' : 'form'); }
-  else if (a === 'to-form') { go('form'); const el = $('#' + (t.dataset.focus || 'app-name')); if (el && t.dataset.focus === 'paste') el.focus(); else if (el && t.dataset.focus === 'csv') { const dz = $('#dz'); if (dz) dz.scrollIntoView({block: 'center'}); } }
+  else if (a === 'to-form') { go('form'); const el = $('#' + (t.dataset.focus || 'app-name')); if (el && t.dataset.focus === 'paste') el.focus(); }
   else if (a === 'filter') { S.tbl.filter = v; S.tbl.page = 1; updateTable(); }
   else if (a === 'page') { S.tbl.page = Number(v); updateTable(); $('#tbody').closest('section').scrollIntoView({block: 'start'}); }
   else if (a === 'example') { S.check.text = EXAMPLES[Number(t.dataset.i)].text; S.check.result = null; S.check.err = ''; render(); }
@@ -571,7 +557,6 @@ main.addEventListener('change', (e) => {
   const b = e.target.dataset.bind; if (!b) return;
   if (b === 'ccountry') { S.cmp.country = e.target.value; ['a', 'b'].forEach((k) => { Object.assign(S.cmp.slots[k], {apps: [], selected: '', msg: ''}); }); render(); }
   else if (b === 'country') { S.form.country = e.target.value; S.form.apps = []; S.form.selected = ''; S.form.searchMsg = ''; render(); }
-  else if (b === 'file') { const file = e.target.files && e.target.files[0]; if (file) { S.form.file = file; render(); } }
 });
 
 main.addEventListener('keydown', (e) => {
@@ -588,15 +573,6 @@ main.addEventListener('keydown', (e) => {
     e.target.value.split(',').map((s) => s.trim()).filter(Boolean).forEach((s) => { if (S.form.cats.indexOf(s) < 0) S.form.cats.push(s); });
     render(); const el = $('#cat-add'); if (el) el.focus();
   }
-});
-
-main.addEventListener('dragover', (e) => { const z = e.target.closest('.dropzone'); if (z) { e.preventDefault(); z.classList.add('over'); } });
-main.addEventListener('dragleave', (e) => { const z = e.target.closest('.dropzone'); if (z) z.classList.remove('over'); });
-main.addEventListener('drop', (e) => {
-  const z = e.target.closest('.dropzone'); if (!z) return;
-  e.preventDefault();
-  const file = e.dataTransfer.files && e.dataTransfer.files[0];
-  if (file) { S.form.file = file; render(); }
 });
 
 $('#nav').addEventListener('click', (e) => {
