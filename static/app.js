@@ -35,6 +35,7 @@ const PATHS = {
   flag: '<path d="M6 21V4"/><path d="M6 5h11l-2 4 2 4H6"/>',
   code: '<path d="m8.5 8-4 4 4 4M15.5 8l4 4-4 4"/>'
 };
+PATHS.scale = '<path d="M12 4v16M7 20h10"/><path d="M5 7h14"/><path d="M5 7l-3 7a3.5 3.5 0 0 0 6 0L5 7zM19 7l-3 7a3.5 3.5 0 0 0 6 0L19 7z"/>';
 const ic = (name, cls) => '<svg class="ic ' + (cls || '') + '" viewBox="0 0 24 24" aria-hidden="true">' + PATHS[name] + '</svg>';
 const spinner = (cls) => '<svg class="ic spin ' + (cls || '') + '" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5" stroke="#F1D6C7"/><path d="M12 3.5a8.5 8.5 0 0 1 8.5 8.5"/></svg>';
 
@@ -62,14 +63,16 @@ const S = {
   jobId: null, prog: {step: 0, pct: 0, notes: ['', '', '', ''], steps: []}, loadingMeta: '',
   result: null, error: null, poll: null,
   tbl: {filter: 'all', q: '', page: 1},
-  check: {text: EXAMPLES[0].text, result: null, busy: false, err: ''}
+  check: {text: EXAMPLES[0].text, result: null, busy: false, err: ''},
+  cmp: {country: 'United States', maxN: 300, cats: [], slots: {a: {name: '', apps: [], selected: '', msg: '', busy: false}, b: {name: '', apps: [], selected: '', msg: '', busy: false}}},
+  cres: null, kind: 'analyze'
 };
 const PAGE_SIZE = 10;
 
 /* ---------------------------------------------------------------- layout */
 function renderNav() {
-  const active = {form: 'form', loading: 'form', error: 'form', results: 'form', check: 'check', about: 'about'}[S.view];
-  const items = [['form', 'chart', 'Analyze a file', '#/'], ['check', 'chat', 'Check one review', '#/check'], ['about', 'info', 'About', '#/about']];
+  const active = {form: 'form', loading: S.kind === 'compare' ? 'compare' : 'form', error: S.kind === 'compare' ? 'compare' : 'form', results: 'form', compare: 'compare', cresults: 'compare', check: 'check', about: 'about'}[S.view];
+  const items = [['form', 'chart', 'Analyze a file', '#/'], ['compare', 'scale', 'Compare apps', '#/compare'], ['check', 'chat', 'Check one review', '#/check'], ['about', 'info', 'About', '#/about']];
   $('#nav').innerHTML = items.map(([id, icon, label, href]) =>
     '<a href="' + href + '" data-nav="' + id + '"' + (active === id ? ' aria-current="page"' : '') + '>' + ic(icon) + label + '</a>').join('');
 }
@@ -77,17 +80,17 @@ function renderNav() {
 function render() {
   const main = $('#main');
   main.className = (S.view === 'check' || S.view === 'about') ? 'narrow' : '';
-  const views = {form: viewForm, loading: viewLoading, results: viewResults, error: viewError, check: viewCheck, about: viewAbout};
+  const views = {form: viewForm, loading: viewLoading, results: viewResults, error: viewError, check: viewCheck, about: viewAbout, compare: viewCompare, cresults: viewCompareResults};
   main.innerHTML = views[S.view]();
   renderNav();
   if (S.view === 'results') updateTable();
   document.title = {form: 'Analyze a file', loading: 'Analyzing reviews', results: 'Results', error: 'We could not analyze this',
-                    check: 'Check one review', about: 'About'}[S.view] + ' · App Reviews Analyzer';
+                    check: 'Check one review', about: 'About', compare: 'Compare apps', cresults: 'Comparison'}[S.view] + ' · App Reviews Analyzer';
 }
 
 function go(view) {
   S.view = view;
-  const h = {form: '#/', check: '#/check', about: '#/about', results: '#/results'}[view];
+  const h = {form: '#/', check: '#/check', about: '#/about', results: '#/results', compare: '#/compare', cresults: '#/comparison'}[view];
   if (h && location.hash !== h) history.pushState(null, '', h);
   render();
   window.scrollTo(0, 0);
@@ -176,6 +179,7 @@ async function startAnalyze() {
   fd.append('country', f.country); fd.append('cat_mode', f.catMode); fd.append('categories', f.cats.join(','));
   fd.append('max_reviews', f.maxN); fd.append('method', f.method);
   S.loadingMeta = hasFile ? f.file.name : hasPaste ? 'Pasted reviews' : f.selected.replace(/\s*\(\d+\)\s*$/, '') + ' · App Store';
+  S.kind = 'analyze';
   S.prog = {step: 0, pct: 0, notes: ['Starting', '', '', ''], steps: ['Loading models', 'Reading sentiment', 'Sorting complaints', 'Writing summary']};
   go('loading');
   try {
@@ -195,6 +199,7 @@ function pollJob(id) {
     try {
       const d = await (await fetch('/api/jobs/' + id)).json();
       if (S.jobId !== id) return;
+      if (d.status === 'done' && d.result && d.result.kind === 'compare') { S.cres = d.result; return go('cresults'); }
       if (d.status === 'done') { S.result = d.result; S.tbl = {filter: 'all', q: '', page: 1}; return go('results'); }
       if (d.status === 'error') { S.error = d.error; return go('error'); }
       S.prog = {step: d.step, pct: d.pct, notes: d.notes, steps: d.steps};
@@ -225,8 +230,8 @@ function progInner() {
 function viewLoading() {
   const skel = (w) => '<div class="skel pulse" style="height:112px"><i style="width:40%"></i><i style="width:30%;height:28px"></i></div>';
   const skelBig = '<div class="skel pulse" style="flex:1 1 420px;height:320px"><i style="width:45%"></i><i style="width:90%;height:18px"></i><i style="width:72%;height:18px"></i><i style="width:60%;height:18px"></i><i style="width:44%;height:18px"></i><i style="width:30%;height:18px"></i></div>';
-  return '<div class="head-row"><div class="head-col"><h1>Analyzing reviews</h1><div class="meta"><span>' + ic('file', 's16') + esc(S.loadingMeta) + '</span><span aria-hidden="true">·</span><span>' +
-    METHOD_LABEL[S.form.method] + ' summary</span></div></div><button type="button" class="btn" data-act="cancel">Cancel</button></div>' +
+  return '<div class="head-row"><div class="head-col"><h1>' + (S.kind === 'compare' ? 'Comparing apps' : 'Analyzing reviews') + '</h1><div class="meta"><span>' + ic('file', 's16') + esc(S.loadingMeta) + '</span><span aria-hidden="true">·</span><span>' +
+    (S.kind === 'compare' ? 'Same categories for both apps' : METHOD_LABEL[S.form.method] + ' summary') + '</span></div></div><button type="button" class="btn" data-act="cancel">Cancel</button></div>' +
     '<section class="card" id="prog" aria-live="polite" style="padding:28px;gap:24px">' + progInner() + '</section>' +
     '<div aria-hidden="true" style="display:flex;flex-direction:column;gap:24px"><div class="skel-grid">' + skel() + skel() + skel() + '</div><div class="two">' + skelBig + skelBig + '</div></div>';
 }
@@ -234,6 +239,7 @@ function viewLoading() {
 /* ---------------------------------------------------------------- error */
 function viewError() {
   const e = S.error || {title: 'Something went wrong', message: 'Please try again.'};
+  if (S.kind === 'compare') return '<h1>Compare apps</h1><section class="card errbox" role="alert" aria-labelledby="err-h">' + ILLUS_ERROR + '<h2 id="err-h">' + esc(e.title) + '</h2><p>' + esc(e.message) + '</p><div class="btns" style="justify-content:center;margin-top:8px"><button type="button" class="btn primary" data-act="to-compare">' + ic('scale', 's18') + 'Back to comparison</button></div></section>';
   return '<h1>Analyze a file</h1>' +
   '<section class="card errbox" role="alert" aria-labelledby="err-h">' + ILLUS_ERROR + '<h2 id="err-h">' + esc(e.title) + '</h2><p>' + esc(e.message) + '</p>' +
     '<div class="btns" style="justify-content:center;margin-top:8px"><button type="button" class="btn primary" data-act="to-form" data-focus="csv">' + ic('upload', 's18') + 'Choose another file</button>' +
@@ -433,6 +439,96 @@ function viewAbout() {
     (cfg.github_url ? '<a class="btn" href="' + esc(cfg.github_url) + '" rel="noopener">' + ic('code', 's18') + 'View source code</a>' : '') + '</section>';
 }
 
+/* ---------------------------------------------------------------- compare two apps */
+const cleanName = (a) => a.replace(/\s*\(\d+\)\s*$/, '');
+const COLOR_A = '#B4532F', COLOR_B = '#2E5E7E';
+
+function slotBlock(k) {
+  const sl = S.cmp.slots[k], tag = k.toUpperCase();
+  const list = sl.apps.length ? '<div class="applist" role="group" aria-label="Matching apps for app ' + tag + '">' + sl.apps.map((a) =>
+    '<button type="button" class="appopt" data-act="cpick" data-slot="' + k + '" data-val="' + esc(a) + '" aria-pressed="' + (a === sl.selected) + '">' + ic('bag', 's18') + '<span>' + esc(cleanName(a)) + '</span></button>').join('') + '</div>' : '';
+  return '<section class="card slot" aria-labelledby="slot-' + k + '"><h2 id="slot-' + k + '" class="with-ic"><span class="dot" style="background:' + (k === 'a' ? COLOR_A : COLOR_B) + '"></span>App ' + tag + '</h2>' +
+    '<div class="appfind"><input id="cmp-name-' + k + '" class="input" type="text" placeholder="' + (k === 'a' ? 'e.g. Spotify' : 'e.g. Apple Music') + '" aria-label="App ' + tag + ' name" data-bind="cname" data-slot="' + k + '" value="' + esc(sl.name) + '">' +
+    '<button type="button" class="btn" data-act="csearch" data-slot="' + k + '"' + (sl.busy ? ' disabled' : '') + '>' + (sl.busy ? spinner('s18') : ic('search', 's18')) + 'Find app</button></div>' +
+    (sl.msg ? '<span class="sub" role="status">' + esc(sl.msg) + '</span>' : '') + list + '</section>';
+}
+
+function viewCompare() {
+  const c = S.cmp;
+  const chips = '<div class="chips">' + c.cats.map((x, i) => '<span class="chip">' + esc(x) + '<button type="button" data-act="crm-cat" data-i="' + i + '" aria-label="Remove ' + esc(x) + '">' + ic('x', 's14') + '</button></span>').join('') +
+    '<input id="ccat-add" type="text" placeholder="Add a category" aria-label="Add a category"></div>';
+  return '<div class="head-col"><h1>Compare apps</h1><p class="muted" style="max-width:680px">Pick two App Store apps. Both are read the same way and their complaints are sorted into the same categories, so you can see where one app is worse than the other.</p></div>' +
+  '<div class="two">' + slotBlock('a') + slotBlock('b') + '</div>' +
+  '<section class="card" aria-labelledby="cs-h" style="gap:22px"><h2 id="cs-h" class="with-ic">' + ic('sliders') + 'Settings</h2>' +
+    '<div class="field"><label class="label" for="ccountry">' + ic('bag', 's18') + 'App Store country</label><select id="ccountry" class="select" data-bind="ccountry" style="max-width:260px">' +
+      S.cfg.countries.map((x) => '<option' + (x === c.country ? ' selected' : '') + '>' + esc(x) + '</option>').join('') + '</select></div>' +
+    '<div class="field" style="gap:10px"><span class="label">' + ic('tag', 's18') + 'Complaint categories (shared by both apps)</span>' + chips + '<span class="sub">Press Enter to add. At least two. Using the same list is what makes the numbers comparable.</span></div>' +
+    '<div class="field" style="gap:10px"><div class="rng-row"><label for="cmax" class="label" style="font-weight:500">Reviews per app</label><output class="mono" id="cmax-o" style="font-size:15px;color:var(--accent-dark)">' + c.maxN + '</output></div>' +
+      '<input id="cmax" type="range" min="50" max="500" step="50" value="' + c.maxN + '" data-bind="cmax"><div class="rng-ends"><span>50</span><span>500</span></div></div>' +
+    '<button type="button" class="btn primary big" data-act="compare" style="align-self:flex-start">' + ic('scale') + 'Compare</button></section>';
+}
+
+async function csearch(k) {
+  const sl = S.cmp.slots[k];
+  if (!sl.name.trim()) { sl.msg = 'Type an app name first.'; sl.apps = []; return render(); }
+  sl.busy = true; render();
+  try {
+    const d = await (await fetch('/api/search', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name: sl.name, country: S.cmp.country})})).json();
+    sl.apps = d.apps || []; sl.selected = sl.apps[0] || ''; sl.msg = d.message || '';
+  } catch (e) { sl.apps = []; sl.msg = 'Could not reach the server. Try again.'; }
+  sl.busy = false; render();
+}
+
+async function startCompare() {
+  const c = S.cmp, a = c.slots.a.selected, b = c.slots.b.selected;
+  S.kind = 'compare';
+  if (!a || !b) { S.error = {title: 'Pick two apps', message: 'Find app A and app B, pick one from each list, then press Compare.'}; return go('error'); }
+  S.loadingMeta = cleanName(a) + ' vs ' + cleanName(b);
+  S.prog = {step: 0, pct: 0, notes: ['Starting', '', '', ''], steps: ['Getting reviews', 'Reading sentiment', 'Sorting complaints', 'Comparing']};
+  go('loading');
+  try {
+    const r = await fetch('/api/compare', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({app_a: a, app_b: b, country: c.country, categories: c.cats, max_reviews: c.maxN})});
+    const d = await r.json();
+    if (!r.ok) { S.error = d.error || {title: 'Something went wrong', message: 'The server refused this request.'}; return go('error'); }
+    S.jobId = d.job; pollJob(d.job);
+  } catch (e) { S.error = {title: 'Could not reach the server', message: 'Check your connection and try again.'}; go('error'); }
+}
+
+function viewCompareResults() {
+  const r = S.cres; if (!r) return viewCompare();
+  const [A, B] = r.apps;
+  const card = (x, col) => {
+    const per = x.period ? x.period.from + ' to ' + x.period.to + ' (' + x.period.days + ' days)' : 'No dates in these reviews';
+    return '<section class="card" style="gap:16px;border-top:4px solid ' + col + '"><h2 style="font-size:20px;line-height:26px">' + esc(x.name) + '</h2>' +
+      '<div class="stat"><span class="stat-l">Negative reviews</span><span class="stat-v serif" style="color:var(--neg-text)">' + x.neg_pct + '%</span></div>' +
+      '<dl class="kv"><div><dt>Average stars</dt><dd class="mono">' + (x.avg_stars == null ? 'n/a' : x.avg_stars + ' of 5') + '</dd></div>' +
+      '<div><dt>Reviews analysed</dt><dd class="mono">' + fmt(x.n) + '</dd></div>' +
+      '<div><dt>Period covered</dt><dd>' + esc(per) + '</dd></div></dl></section>';
+  };
+  const max = Math.max.apply(null, r.rows.map((x) => Math.max(x.a, x.b)).concat([1]));
+  const rows = r.rows.map((x) =>
+    '<li class="cmp-row"><div class="cmp-top"><span class="bl">' + esc(x.label) + '</span>' + (x.clear ? '<span class="badge neg">Clear difference</span>' : '') + '</div>' +
+    '<div class="cmp-bars"><span class="tr"><i style="width:' + Math.round(100 * x.a / max) + '%;background:' + COLOR_A + '"></i></span><span class="bv mono">' + x.a + '%</span>' +
+    '<span class="tr"><i style="width:' + Math.round(100 * x.b / max) + '%;background:' + COLOR_B + '"></i></span><span class="bv mono">' + x.b + '%</span></div></li>').join('');
+  const words = (x, col) => '<section class="card" style="gap:14px"><h3 style="font-size:16px">Top complaint words, ' + esc(x.name) + '</h3>' +
+    barList(x.words.map((w) => ({l: w.label, v: w.value, t: String(w.value)})), {lw: 110}) + '</section>';
+  const ex = (x) => '<section class="card" style="gap:12px"><h3 style="font-size:16px">What unhappy users of ' + esc(x.name) + ' say</h3>' +
+    (x.examples.length ? '<ul class="quotes">' + x.examples.map((q) => '<li>' + esc(q) + '</li>').join('') + '</ul>' : '<p class="sub">No negative reviews.</p>') + '</section>';
+  return '<div class="head-row"><div class="head-col"><h1>' + esc(A.name) + ' vs ' + esc(B.name) + '</h1><div class="meta"><span>' + ic('bag', 's16') + 'App Store · ' + esc(r.country) + '</span></div></div>' +
+    '<button type="button" class="btn" data-act="to-compare">' + ic('scale', 's18') + 'New comparison</button></div>' +
+  '<section class="card" aria-labelledby="ov-h" style="gap:10px"><h2 id="ov-h" class="with-ic">' + ic('info') + 'Overall</h2><p style="font-size:16px;line-height:24px">' + esc(r.overall.text) + '</p></section>' +
+  '<div class="two">' + card(A, COLOR_A) + card(B, COLOR_B) + '</div>' +
+  '<section class="card" aria-labelledby="cat-h" style="gap:18px"><h2 id="cat-h">Complaints by category</h2>' +
+    '<p class="sub">Share of each app\'s negative reviews. ' + A.n_cat + ' complaints sorted for ' + esc(A.name) + ', ' + B.n_cat + ' for ' + esc(B.name) + '.</p>' +
+    '<div class="legend"><span><i style="background:' + COLOR_A + '"></i>' + esc(A.name) + '</span><span><i style="background:' + COLOR_B + '"></i>' + esc(B.name) + '</span></div>' +
+    '<ul class="cmp-list">' + rows + '</ul>' +
+    '<div class="find"><h3 style="font-size:15px">What stands out</h3><ul>' + r.findings.map((f) => '<li>' + esc(f) + '</li>').join('') + '</ul></div></section>' +
+  '<div class="two">' + words(A) + words(B) + '</div><div class="two">' + ex(A) + ex(B) + '</div>' +
+  '<section class="card" aria-labelledby="fair-h" style="gap:12px"><h2 id="fair-h" class="with-ic">' + ic('warn') + 'Read this before you conclude anything</h2>' +
+    '<ul class="limits">' + r.notes.map((n) => '<li class="plain">' + ic('info') + '<span>' + esc(n) + '</span></li>').join('') +
+    '<li class="plain">' + ic('info') + '<span>These are the latest public reviews only, and unhappy people write more reviews than happy ones. Pretrained models also misread sarcasm. Treat the numbers as a guide, not a ranking.</span></li></ul></section>';
+}
+
 /* ---------------------------------------------------------------- events */
 const main = $('#main');
 
@@ -446,12 +542,17 @@ main.addEventListener('click', (e) => {
   else if (a === 'rm-cat') { f.cats.splice(Number(t.dataset.i), 1); render(); }
   else if (a === 'method') { f.method = v; render(); }
   else if (a === 'analyze') startAnalyze();
-  else if (a === 'cancel') { S.jobId = null; clearTimeout(S.poll); go('form'); }
+  else if (a === 'cancel') { S.jobId = null; clearTimeout(S.poll); go(S.kind === 'compare' ? 'compare' : 'form'); }
   else if (a === 'to-form') { go('form'); const el = $('#' + (t.dataset.focus || 'app-name')); if (el && t.dataset.focus === 'paste') el.focus(); else if (el && t.dataset.focus === 'csv') { const dz = $('#dz'); if (dz) dz.scrollIntoView({block: 'center'}); } }
   else if (a === 'filter') { S.tbl.filter = v; S.tbl.page = 1; updateTable(); }
   else if (a === 'page') { S.tbl.page = Number(v); updateTable(); $('#tbody').closest('section').scrollIntoView({block: 'start'}); }
   else if (a === 'example') { S.check.text = EXAMPLES[Number(t.dataset.i)].text; S.check.result = null; S.check.err = ''; render(); }
   else if (a === 'check') doCheck();
+  else if (a === 'csearch') csearch(t.dataset.slot);
+  else if (a === 'cpick') { S.cmp.slots[t.dataset.slot].selected = v; render(); }
+  else if (a === 'crm-cat') { S.cmp.cats.splice(Number(t.dataset.i), 1); render(); }
+  else if (a === 'compare') startCompare();
+  else if (a === 'to-compare') go('compare');
 });
 
 main.addEventListener('input', (e) => {
@@ -462,17 +563,26 @@ main.addEventListener('input', (e) => {
   else if (b === 'maxN') { f.maxN = Number(e.target.value); const o = $('#max-o'); if (o) o.textContent = f.maxN; }
   else if (b === 'q') { S.tbl.q = e.target.value; S.tbl.page = 1; updateTable(); }
   else if (b === 'checkText') S.check.text = e.target.value;
+  else if (b === 'cname') S.cmp.slots[e.target.dataset.slot].name = e.target.value;
+  else if (b === 'cmax') { S.cmp.maxN = Number(e.target.value); const o = $('#cmax-o'); if (o) o.textContent = S.cmp.maxN; }
 });
 
 main.addEventListener('change', (e) => {
   const b = e.target.dataset.bind; if (!b) return;
-  if (b === 'country') { S.form.country = e.target.value; S.form.apps = []; S.form.selected = ''; S.form.searchMsg = ''; render(); }
+  if (b === 'ccountry') { S.cmp.country = e.target.value; ['a', 'b'].forEach((k) => { Object.assign(S.cmp.slots[k], {apps: [], selected: '', msg: ''}); }); render(); }
+  else if (b === 'country') { S.form.country = e.target.value; S.form.apps = []; S.form.selected = ''; S.form.searchMsg = ''; render(); }
   else if (b === 'file') { const file = e.target.files && e.target.files[0]; if (file) { S.form.file = file; render(); } }
 });
 
 main.addEventListener('keydown', (e) => {
   if (e.key !== 'Enter') return;
   if (e.target.id === 'app-name') { e.preventDefault(); doSearch(); }
+  else if (e.target.id === 'cmp-name-a' || e.target.id === 'cmp-name-b') { e.preventDefault(); csearch(e.target.id.slice(-1)); }
+  else if (e.target.id === 'ccat-add') {
+    e.preventDefault();
+    e.target.value.split(',').map((s) => s.trim()).filter(Boolean).forEach((s) => { if (S.cmp.cats.indexOf(s) < 0) S.cmp.cats.push(s); });
+    render(); const el = $('#ccat-add'); if (el) el.focus();
+  }
   else if (e.target.id === 'cat-add') {
     e.preventDefault();
     e.target.value.split(',').map((s) => s.trim()).filter(Boolean).forEach((s) => { if (S.form.cats.indexOf(s) < 0) S.form.cats.push(s); });
@@ -498,7 +608,7 @@ $('#nav').addEventListener('click', (e) => {
 $('.brand').addEventListener('click', (e) => { e.preventDefault(); go('form'); });
 window.addEventListener('popstate', () => {
   const h = location.hash;
-  S.view = h === '#/check' ? 'check' : h === '#/about' ? 'about' : h === '#/results' && S.result ? 'results' : 'form';
+  S.view = h === '#/check' ? 'check' : h === '#/about' ? 'about' : h === '#/compare' ? 'compare' : h === '#/comparison' && S.cres ? 'cresults' : h === '#/results' && S.result ? 'results' : 'form';
   render();
 });
 
@@ -507,7 +617,8 @@ window.addEventListener('popstate', () => {
   try { Object.assign(S.cfg, await (await fetch('/api/config')).json()); } catch (e) { /* keep defaults */ }
   S.form.cats = S.cfg.default_categories.slice();
   const h = location.hash;
-  S.view = h === '#/check' ? 'check' : h === '#/about' ? 'about' : 'form';
+  S.cmp.cats = S.cfg.default_categories.slice();
+  S.view = h === '#/check' ? 'check' : h === '#/about' ? 'about' : h === '#/compare' ? 'compare' : 'form';
   render();
 })();
 })();

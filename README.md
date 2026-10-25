@@ -45,3 +45,11 @@ The link works while the notebook runs. The first start downloads about 3.5 GB o
 
 Optional variables: `BUILT_BY` (your name in About), `GITHUB_URL` (source link in About),
 `PRELOAD=0` (do not load models at start).
+
+## Compare two apps
+
+Open **Compare apps** in the menu. Find app A and app B, choose one result in each list, keep or edit the shared
+category list, then press Compare. Both apps are sorted into the same categories so the numbers line up. The page
+shows negative share, average stars, the period each app's reviews cover, a per-category comparison, top complaint
+words, example reviews, and fairness notes. Small differences are labelled "not clear" on purpose.
+API: `POST /api/compare` then poll `GET /api/jobs/{id}` like a normal analysis.

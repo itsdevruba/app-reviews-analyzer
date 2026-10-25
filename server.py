@@ -4,6 +4,7 @@ Run:   uvicorn server:app --host 0.0.0.0 --port 8000
 The analysis code is shared with the Gradio version (app.py). Only pretrained models are used.
 Optional environment variables: BUILT_BY (name shown in About), GITHUB_URL, PRELOAD=0 (do not load models at start).
 """
+import math
 import os
 import tempfile
 import threading
@@ -25,6 +26,7 @@ STATIC = Path(__file__).parent / "static"
 UI_CATEGORIES = ["Bugs & crashes", "Login & account", "Ads", "Performance", "Pricing", "UI & design"]
 METHODS = {"pre": "Pretrained (abstractive)", "tfidf": "TF-IDF (extractive)", "bow": "BoW (extractive)"}
 STEP_NAMES = ["Loading models", "Reading sentiment", "Sorting complaints", "Writing summary"]
+COMPARE_STEPS = ["Getting reviews", "Reading sentiment", "Sorting complaints", "Comparing"]
 MODEL_LOCK = threading.Lock()
 EXECUTOR = ThreadPoolExecutor(max_workers=1)      # one analysis at a time (models are heavy)
 JOBS = {}
@@ -39,6 +41,7 @@ class UserError(Exception):
 class Job:
     def __init__(self):
         self.id = uuid.uuid4().hex[:12]
+        self.steps = STEP_NAMES
         self.status = "queued"          # queued | running | done | error
         self.step = 0
         self.pct = 0
@@ -56,7 +59,7 @@ class Job:
 
     def public(self):
         out = {"id": self.id, "status": self.status, "step": self.step, "pct": self.pct,
-               "notes": self.notes, "steps": STEP_NAMES}
+               "notes": self.notes, "steps": self.steps}
         if self.status == "done":
             out["result"] = self.result
         if self.status == "error":
@@ -225,10 +228,136 @@ def analyze(job, p):
     job.progress(3, 100)
 
 
+# ----------------------------------------------------------------------------------------
+# Compare two apps: same categories for both, honest about small differences
+# ----------------------------------------------------------------------------------------
+def _app_label(choice):
+    return choice.rsplit(" (", 1)[0]
+
+
+def _z_two_proportions(x1, n1, x2, n2):
+    p = (x1 + x2) / (n1 + n2)
+    se = math.sqrt(p * (1 - p) * (1 / n1 + 1 / n2))
+    return 0.0 if se == 0 else (x1 / n1 - x2 / n2) / se
+
+
+def compare(job, p):
+    job.steps = COMPARE_STEPS
+    a_choice, b_choice = p["app_a"], p["app_b"]
+    if not a_choice or not b_choice:
+        raise UserError("Pick two apps", "Find app A and app B, pick one from each list, then press Compare.")
+    if a_choice == b_choice:
+        raise UserError("Pick two different apps", "App A and app B are the same app. Choose a different one.")
+    cats = [c.strip() for c in p["categories"] if c.strip()]
+    if len(cats) < 2:
+        raise UserError("Add at least two categories", "Both apps are sorted into the same categories, so type two or more.")
+
+    # 1. reviews
+    entries = []
+    for i, choice in enumerate((a_choice, b_choice)):
+        job.progress(0, 3 + 10 * i, f"Getting reviews of {_app_label(choice)}")
+        try:
+            df = core.fetch_store_reviews(choice, p["country"])
+        except Exception as e:
+            raise UserError(f"We couldn't get reviews of {_app_label(choice)}", str(e)[:300])
+        raw = len(df)
+        df, removed = core.filter_reviews(df, p["max_reviews"])
+        if len(df) < 20:
+            raise UserError("Too few reviews",
+                            f"Only {len(df)} usable English reviews for {_app_label(choice)} ({removed} of {raw} removed). "
+                            "Comparing needs at least 20 per app. Try another country.")
+        entries.append({"choice": choice, "df": df, "usable": raw - removed, "removed": removed})
+    job.notes[0] = "Reviews ready"
+
+    with MODEL_LOCK:
+        job.progress(0, 22, "Loading the models (first time only)")
+        try:
+            sentiment, _, zero_shot = core.get_models()
+        except Exception as e:
+            raise UserError("The models could not be loaded", repr(e)[:300])
+
+        out = []
+        for i, e in enumerate(entries):
+            name = _app_label(e["choice"])
+            df = e["df"]
+            texts = df["review"].tolist()
+            sent = []
+            for k in range(0, len(texts), 64):
+                sent += sentiment(texts[k:k + 64])
+                job.progress(1, 25 + 20 * (i + min(k + 64, len(texts)) / len(texts)) / 2, f"{name}: {min(k + 64, len(texts))} of {len(texts)} reviews")
+            table = df.copy()
+            table["neg"] = [x[0] == "negative" for x in sent]
+            neg_texts = table.loc[table["neg"], "review"].tolist()
+            chosen = neg_texts[:core.MAX_CATEGORY_REVIEWS]
+            labels = []
+            for k in range(0, len(chosen), 10):
+                res = zero_shot([t[:1000] for t in chosen[k:k + 10]], cats)
+                labels += [labs[0] if scs[0] >= core.ZS_MIN else "unclear" for labs, scs in res]
+                job.progress(2, 48 + 40 * (i + (k + 10) / max(1, len(chosen))) / 2, f"{name}: {min(k + 10, len(chosen))} of {len(chosen)} complaints sorted")
+            counts = pd.Series(labels).value_counts()
+            n_cat = int(counts.sum())
+            valid_dates = table["date"].dropna()
+            out.append({
+                "name": name, "n": len(table), "usable": e["usable"], "removed": e["removed"],
+                "neg_n": int(table["neg"].sum()), "neg_pct": round(100 * table["neg"].mean(), 1),
+                "avg_stars": None if table["rating"].isna().all() else round(float(table["rating"].mean()), 2),
+                "period": None if valid_dates.empty else {"from": valid_dates.min().strftime("%b %d, %Y"), "to": valid_dates.max().strftime("%b %d, %Y"),
+                                                           "days": int((valid_dates.max() - valid_dates.min()).days) + 1},
+                "n_cat": n_cat,
+                "categories": {c: round(100 * int(n) / n_cat, 1) for c, n in counts.items()} if n_cat else {},
+                "words": [{"label": w, "value": v} for w, v in core.count_terms(neg_texts, "words").most_common(8)] if neg_texts else [],
+                "examples": [" ".join(t.split())[:240] for t in core.representative_reviews(neg_texts, 2)] if neg_texts else [],
+                "negatives": int(table["neg"].sum()),
+            })
+        job.notes[1], job.notes[2] = "Done", "Done"
+
+    # 3. what differs, and how sure are we
+    job.progress(3, 92, "Comparing the two apps")
+    A, B = out
+    z = _z_two_proportions(round(A["neg_pct"] * A["n"] / 100), A["n"], round(B["neg_pct"] * B["n"] / 100), B["n"])
+    diff = round(A["neg_pct"] - B["neg_pct"], 1)
+    clear = abs(z) >= 1.96
+    hi, lo = (A, B) if diff > 0 else (B, A)
+    overall = {"diff": diff, "clear": clear,
+               "text": (f"{hi['name']} has more negative reviews ({hi['neg_pct']}% vs {lo['neg_pct']}%). "
+                        + ("The gap is large enough that chance is an unlikely explanation." if clear else
+                           "The gap is small for this many reviews, so it may be chance."))
+               if diff != 0 else "Both apps have the same share of negative reviews."}
+    cat_names = sorted({c for a in out for c in a["categories"]}, key=lambda c: -max(A["categories"].get(c, 0), B["categories"].get(c, 0)))
+    big_enough = A["n_cat"] >= 50 and B["n_cat"] >= 50
+    rows, findings = [], []
+    for c in cat_names:
+        pa, pb = A["categories"].get(c, 0.0), B["categories"].get(c, 0.0)
+        d = round(pa - pb, 1)
+        is_clear = c != "unclear" and abs(d) >= 10 and big_enough
+        rows.append({"label": c, "a": pa, "b": pb, "diff": d, "clear": is_clear})
+        if is_clear:
+            who = A if d > 0 else B
+            findings.append(f"{c}: {who['name']} has more complaints about this ({max(pa, pb)}% vs {min(pa, pb)}% of its negative reviews).")
+    if not findings:
+        findings.append("No complaint category differs by 10 points or more, so no clear difference between the two apps.")
+    notes = ["Both apps are sorted into the same categories so the numbers can be compared. Each app uses its latest public reviews, not the same dates."]
+    for a in out:
+        if a["period"] is None:
+            continue
+    if all(a["period"] for a in out):
+        da, db = A["period"]["days"], B["period"]["days"]
+        if max(da, db) > 2 * min(da, db):
+            notes.append(f"The reviews cover different periods ({A['name']}: {da} days, {B['name']}: {db} days). Compare with care.")
+    if not big_enough:
+        notes.append("One of the apps has fewer than 50 sorted complaints, so category differences are shown as not clear.")
+    for a in out:
+        a["categories"] = [{"label": c, "pct": v} for c, v in a["categories"].items()]
+    job.notes[3] = "Done"
+    job.result = {"kind": "compare", "apps": out, "country": p["country"], "categories_used": cats,
+                  "overall": overall, "rows": rows, "findings": findings, "notes": notes}
+    job.progress(3, 100)
+
+
 def run_job(job, params):
     job.status = "running"
     try:
-        analyze(job, params)
+        (compare if params.get("kind") == "compare" else analyze)(job, params)
         job.status, job.pct = "done", 100
     except UserError as e:
         job.status, job.error = "error", {"title": e.title, "message": e.message}
@@ -267,6 +396,14 @@ class SearchIn(BaseModel):
     country: str = "United States"
 
 
+class CompareIn(BaseModel):
+    app_a: str = ""
+    app_b: str = ""
+    country: str = "United States"
+    categories: list[str] = UI_CATEGORIES
+    max_reviews: int = 300
+
+
 class CheckIn(BaseModel):
     text: str = ""
     categories: list[str] = UI_CATEGORIES
@@ -301,6 +438,16 @@ async def start_analyze(file: UploadFile | None = File(None), pasted: str = Form
     job = Job()
     for old in [k for k, j in JOBS.items() if time.time() - j.created > 3600]:
         JOBS.pop(old, None)
+    JOBS[job.id] = job
+    EXECUTOR.submit(run_job, job, params)
+    return {"job": job.id}
+
+
+@app.post("/api/compare")
+def start_compare(body: CompareIn):
+    params = {"kind": "compare", "app_a": body.app_a, "app_b": body.app_b, "country": body.country,
+              "categories": body.categories, "max_reviews": max(50, min(int(body.max_reviews), 1000))}
+    job = Job()
     JOBS[job.id] = job
     EXECUTOR.submit(run_job, job, params)
     return {"job": job.id}
